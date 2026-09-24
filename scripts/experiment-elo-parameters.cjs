@@ -21,13 +21,9 @@ const updateFactors = [0.7, 0.75, 0.8, 0.85];
 const scales = [400];
 const searchOffsets = [0.5];
 const seedRankRadii = [1000000];
-const adjustDeltaRanges = [
-  // { name: "off", min: 0, max: 0 },
-  // { name: "cap-10", min: -10, max: 10 },
-  { name: "cap-inflation", min: -10000, max: 10 },
-  { name: "deflation-only", min: -10000, max: 0 },
-  // { name: "full", min: -10000, max: 10000 },
-];
+// 0 leaves the raw surplus alone (best rank correlation), 1 is exact zero-sum
+// (population mean pinned to the initial rating forever). See elo-core.cjs.
+const adjustAlphas = [0, 0.25, 0.5, 0.75, 1];
 const aggregationMethods = ["log-power-mean"];
 const predictionAggregationMethods = [null];
 
@@ -362,6 +358,7 @@ function aggregateRatingStability(output) {
     returningAppearanceDelta,
     meanReturningAppearanceDelta: returningAppearanceCount > 0 ? returningAppearanceDelta / returningAppearanceCount : null,
     meanFinalRating: ratedCount > 0 ? finalRatingSum / ratedCount : null,
+    ratingDrift: ratedCount > 0 ? finalRatingSum / ratedCount - initialRating : null,
     frequentMeanFinalRating: frequentCount > 0 ? frequentRatingSum / frequentCount : null,
     latestActiveYear: latestYear,
     latestActiveMeanFinalRating: latestActiveCount > 0 ? latestActiveRatingSum / latestActiveCount : null,
@@ -386,7 +383,7 @@ for (const scale of scales) {
   for (const updateFactor of updateFactors) {
     for (const searchOffset of searchOffsets) {
       for (const seedRankRadius of seedRankRadii) {
-        for (const adjustDeltaRange of adjustDeltaRanges) {
+        for (const adjustAlpha of adjustAlphas) {
           for (const aggregationMethod of aggregationMethods) {
             for (const predictionAggregationMethod of predictionAggregationMethods) {
               console.log(
@@ -395,7 +392,7 @@ for (const scale of scales) {
                 updateFactor,
                 searchOffset,
                 seedRankRadius,
-                adjustDeltaRange.name,
+                adjustAlpha,
                 aggregationMethod,
                 predictionAggregationMethod,
               );
@@ -411,8 +408,7 @@ for (const scale of scales) {
                     XCPC_ELO_UPDATE_FACTOR: `${updateFactor}`,
                     XCPC_ELO_SEARCH_OFFSET: `${searchOffset}`,
                     XCPC_ELO_SEED_RANK_RADIUS: `${seedRankRadius}`,
-                    XCPC_ELO_MIN_ADJUST_DELTA: `${adjustDeltaRange.min}`,
-                    XCPC_ELO_MAX_ADJUST_DELTA: `${adjustDeltaRange.max}`,
+                    XCPC_ELO_ADJUST_ALPHA: `${adjustAlpha}`,
                     XCPC_ELO_TEAM_RATING_AGGREGATION: `${aggregationMethod}`,
                   },
                   encoding: "utf8",
@@ -425,9 +421,7 @@ for (const scale of scales) {
                 updateFactor,
                 searchOffset,
                 seedRankRadius,
-                adjustDeltaMode: adjustDeltaRange.name,
-                minAdjustDelta: adjustDeltaRange.min,
-                maxAdjustDelta: adjustDeltaRange.max,
+                adjustAlpha,
                 aggregationMethod,
                 predictionAggregationMethod,
                 ...aggregateStatistics(output, predictionAggregationMethod),
@@ -467,9 +461,7 @@ function toCsv(rows) {
     "updateFactor",
     "searchOffset",
     "seedRankRadius",
-    "adjustDeltaMode",
-    "minAdjustDelta",
-    "maxAdjustDelta",
+    "adjustAlpha",
     "aggregationMethod",
     "contests",
   ];
@@ -484,6 +476,7 @@ function toCsv(rows) {
     "returningAppearanceDelta",
     "meanReturningAppearanceDelta",
     "meanFinalRating",
+    "ratingDrift",
     "frequentMeanFinalRating",
     "latestActiveYear",
     "latestActiveMeanFinalRating",

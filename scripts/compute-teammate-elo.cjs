@@ -8,7 +8,9 @@ const {
   ELO_SCALE,
   ELO_TEAM_RATING_AGGREGATION,
   ELO_UPDATE_FACTOR,
+  ELO_ADJUST_ALPHA,
 } = require("./lib/elo-core.cjs");
+const { checkEloHealth, formatHealthReport } = require("./lib/health-check.cjs");
 const {
   isUnratedContest,
   normalize,
@@ -63,9 +65,19 @@ function buildTeammateIndex(teammateMap) {
     byPairLower.set(key.toLowerCase(), id);
   }
 
+  // Alias pairs are redirected to the canonical identity's id. They must be
+  // registered explicitly: the alias pair itself is not one of the entries, and
+  // without the redirect the resolver would register a brand new identity for it.
+  for (const [key, id] of Object.entries((teammateMap && teammateMap.aliasPairs) || {})) {
+    if (!key || !id || !byId.has(id)) {
+      continue;
+    }
+    byPair.set(key, id);
+    byPairLower.set(key.toLowerCase(), id);
+  }
+
   return { byId, byPair, byPairLower };
 }
-
 /**
  * Resolves or registers a teammate ID for an organization/name pair.
  *
@@ -303,6 +315,7 @@ function buildTeammateElo(staticRootDir, teammateMapFile, outputFile, initialRat
       eloScale: ELO_SCALE,
       eloUpdateFactor: ELO_UPDATE_FACTOR,
       teamRatingAggregation: ELO_TEAM_RATING_AGGREGATION,
+      adjustAlpha: ELO_ADJUST_ALPHA,
     },
     totals: {
       contests: contests.length,
@@ -347,6 +360,17 @@ function main() {
   console.log(`Rating events: ${result.totals.ratingEvents}`);
   console.log(`Skipped invalid contests: ${result.source.skippedInvalidContests}`);
   console.log(`Saved teammate Elo data to: ${outputFile}`);
+
+  if (process.env.XCPC_ELO_SKIP_HEALTH === "1") {
+    return;
+  }
+  const report = checkEloHealth(result);
+  console.log(formatHealthReport(report));
+  if (!report.ok) {
+    console.error("\nElo health check failed. The rating level is drifting or the model regressed.");
+    console.error("Re-run with XCPC_ELO_SKIP_HEALTH=1 if this is expected and intentional.");
+    process.exitCode = 1;
+  }
 }
 
 main();
