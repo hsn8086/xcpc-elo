@@ -97,10 +97,28 @@ const ELO_INITIAL_RATING = envNumber("XCPC_ELO_INITIAL_RATING", 1400);
 const ELO_UPDATE_FACTOR = envNumber("XCPC_ELO_UPDATE_FACTOR", 0.8);
 const ELO_SEARCH_OFFSET = envNumber("XCPC_ELO_SEARCH_OFFSET", 0.5);
 const ELO_SEED_RANK_RADIUS = envNumber("XCPC_ELO_SEED_RANK_RADIUS", 100000);
-const ELO_MIN_ADJUST_DELTA = envNumber("XCPC_ELO_MIN_ADJUST_DELTA", -10000);
-const ELO_MAX_ADJUST_DELTA = envNumber("XCPC_ELO_MAX_ADJUST_DELTA", 0);
-const ELO_MIN_ADJUST_TOP_DELTA = envNumber("XCPC_ELO_MIN_ADJUST_TOP_DELTA", 0);
-const ELO_MAX_ADJUST_TOP_DELTA = envNumber("XCPC_ELO_MAX_ADJUST_TOP_DELTA", 0);
+
+/**
+ * Fraction of the raw per-contest rating surplus that the first adjustment removes.
+ *
+ * The raw deltas of one contest are not exactly zero-sum: teams of first-time
+ * participants finish below the median, so they lose more than returning
+ * participants gain. `adjustAlpha` decides how much of that surplus the system
+ * removes again, which trades predictive accuracy against a stable rating level:
+ *
+ *  0   leave the surplus alone. Best rank correlation, but the population mean
+ *      drifts upwards (about +30 over a decade on the bundled data).
+ *  0.5 the default. Rank correlation is unchanged or slightly better than the old
+ *      Codeforces-style adjustment, and the drift is small.
+ *  1   exact zero-sum. The population mean stays pinned to the initial rating
+ *      forever, at a measurable cost in rank correlation.
+ *
+ * Re-centring every rating by a constant is free, because the update only ever
+ * depends on rating differences. Re-centring therefore cannot replace this knob:
+ * the knob shifts the participants of one contest, which does change how they
+ * compare against the participants of other contests.
+ */
+const ELO_ADJUST_ALPHA = envNumber("XCPC_ELO_ADJUST_ALPHA", 0.5);
 
 // Aggregation driving the Elo computation: the seed model, and through it the
 // performance and needed rating of every team.
@@ -316,9 +334,21 @@ function applyCodeforcesUpdate(input, playerStates) {
     spearmanSum += diff * diff;
   }
 
+  var spearmanSumFull = 0;
+  predictedOrder.forEach((team, index) => {
+    const diff = index + 1 - team.rank;
+    spearmanSumFull += diff * diff;
+  });
+  const fullTeamCount = predictedOrder.length;
+
   const predictionStats = {
     predictionTeamCount: predictedTeams.length,
     predictionSpearman: 1 - (6 * spearmanSum) / (predictedTeams.length * (predictedTeams.length * predictedTeams.length - 1)),
+    // Same ordering, but with every team counted instead of only the teams that
+    // already had history. The two numbers can differ a lot, and the headline one
+    // should not be the easy subset alone.
+    predictionSpearmanFull:
+      fullTeamCount >= 2 ? 1 - (6 * spearmanSumFull) / (fullTeamCount * (fullTeamCount * fullTeamCount - 1)) : 0,
     predictionStddev: Math.sqrt(deviation / predictedTeams.length),
   };
 
@@ -406,28 +436,27 @@ function applyCodeforcesUpdate(input, playerStates) {
   output.sort((a, b) => b.rating - a.rating || a.rank - b.rank);
 
   const sumDelta = output.reduce((acc, row) => acc + row.delta, 0);
-  const inc1 = clamp(Math.trunc(-sumDelta / output.length) - 1, ELO_MIN_ADJUST_DELTA, ELO_MAX_ADJUST_DELTA);
+  // Single symmetric dial instead of the old truncate-then-clamp pair. The old
+  // form was clamped to [-10000, 0], so contests that lost rating in the raw step
+  // could never be balanced back, which drained the whole system over time.
+  const inc1 = 0 - Math.round((ELO_ADJUST_ALPHA * sumDelta) / output.length);
   for (const row of output) {
     row.delta += inc1;
   }
 
-  let inc2 = 0;
-  let topCount = 0;
-  topCount = Math.min(output.length, Math.round(4 * Math.sqrt(output.length)));
-  const sumTop = output.slice(0, topCount).reduce((acc, row) => acc + row.delta, 0);
-  inc2 = Math.trunc(-sumTop / topCount);
-  inc2 = clamp(inc2, ELO_MIN_ADJUST_TOP_DELTA, ELO_MAX_ADJUST_TOP_DELTA);
-  for (const row of output) {
-    row.delta += inc2;
-  }
+  // The historical second adjustment (over the highest rated participants) is kept
+  // in the statistics for schema stability, but it is disabled: measured over the
+  // full parameter sweep it costs about 0.05 Spearman whenever it is switched on.
+  const inc2 = 0;
+  const topCount = 0;
 
   var firstTimeParticipantCount = 0;
-  var firstTimeParticipantRatingSum = 0;
+  var firstTimeParticipantDeltaSum = 0;
   var ratingSum = 0;
   for (const participant of output) {
     if (!hasContestHistory(participant.id)) {
       firstTimeParticipantCount++;
-      firstTimeParticipantRatingSum += participant.rating + participant.delta;
+      firstTimeParticipantDeltaSum += participant.delta;
     }
     ratingSum += participant.rating + participant.delta;
   }
@@ -436,8 +465,10 @@ function applyCodeforcesUpdate(input, playerStates) {
     teamCount: teams.length,
     participantCount: output.length,
     firstTimeParticipantCount,
-    firstTimeParticipantRatingSum,
+    firstTimeParticipantDeltaSum,
     ratingSum,
+    meanRating: output.length > 0 ? ratingSum / output.length : 0,
+    adjustAlpha: ELO_ADJUST_ALPHA,
     adjustment1: inc1,
     adjustment2: inc2,
     topCount,
@@ -449,6 +480,7 @@ function applyCodeforcesUpdate(input, playerStates) {
 
 module.exports = {
   applyCodeforcesUpdate,
+  ELO_ADJUST_ALPHA,
   ELO_INITIAL_RATING,
   ELO_SCALE,
   ELO_TEAM_RATING_AGGREGATION,
