@@ -65,14 +65,16 @@ function summarizeEloOutput(output) {
   const meanRating = players.length > 0 ? finalRatingSum / players.length : initialRating;
   const firstAppearanceDelta = firstAppearanceCount > 0 ? firstAppearanceDeltaSum / firstAppearanceCount : 0;
   const meanDelta = ratingEvents > 0 ? totalDelta / ratingEvents : 0;
-  const scored = contests.filter(
-    (contest) => contest.statistics && Number.isFinite(contest.statistics.predictionSpearman),
-  );
+  const scored = contests.filter((contest) => contest.statistics && Number.isFinite(contest.statistics.predictionSpearman));
+  // Each field is averaged over the contests that actually carry it, the same way
+  // the frontend does it. Filtering both by one of them would fold the missing
+  // full-field values into the mean as zeroes.
+  const finiteValues = (field) =>
+    contests.map((contest) => (contest.statistics ? contest.statistics[field] : null)).filter((value) => Number.isFinite(value));
   const meanSpearman = scored.length > 0 ? scored.reduce((sum, c) => sum + c.statistics.predictionSpearman, 0) / scored.length : null;
-  // Contests whose whole field is new cannot be predicted at all and yield no
-  // finite Spearman; they are already excluded above and never averaged in.
+  const fullFieldValues = finiteValues("predictionSpearmanFull");
   const meanSpearmanFull =
-    scored.length > 0 ? scored.reduce((sum, c) => sum + (c.statistics.predictionSpearmanFull || 0), 0) / scored.length : null;
+    fullFieldValues.length > 0 ? fullFieldValues.reduce((sum, value) => sum + value, 0) / fullFieldValues.length : null;
 
   return {
     initialRating,
@@ -88,6 +90,71 @@ function summarizeEloOutput(output) {
     meanSpearman,
     meanSpearmanFull,
     scoredContests: scored.length,
+    fullFieldContests: fullFieldValues.length,
+  };
+}
+
+/**
+ * Statistics fields the frontend reads by name.
+ *
+ * The contest page and the subtitle index into these directly, so a rename or a
+ * dropped field shows up as `NaN` in the UI rather than as an error. That is
+ * exactly what happened once already, so the set is asserted instead.
+ */
+const REQUIRED_CONTEST_STATISTICS = [
+  "teamCount",
+  "participantCount",
+  "firstTimeParticipantCount",
+  "firstTimeParticipantRatingSum",
+  "ratingSum",
+  "adjustment1",
+  "adjustment2",
+  "predictionTeamCount",
+];
+
+/**
+ * Statistics fields that are legitimately absent on a degenerate contest.
+ *
+ * A contest whose whole field is new cannot be predicted at all, so it has no
+ * rank correlation and no prediction spread to report.
+ */
+const OPTIONAL_CONTEST_STATISTICS = ["predictionSpearman", "predictionSpearmanFull", "predictionStddev"];
+
+/**
+ * Checks that every contest carries a usable statistics block.
+ *
+ * @param {object} output Elo output.
+ * @returns {{ok: boolean, detail: string, broken: object[]}} Schema report.
+ */
+function checkContestSchema(output) {
+  const broken = [];
+  for (const contest of output.contests || []) {
+    const statistics = contest.statistics;
+    if (!statistics) {
+      broken.push({ key: contest.key, missing: ["<entire statistics block>"] });
+      continue;
+    }
+    const missing = REQUIRED_CONTEST_STATISTICS.filter((field) => !Number.isFinite(statistics[field]));
+    if (missing.length > 0) {
+      broken.push({ key: contest.key, missing });
+    }
+    for (const field of OPTIONAL_CONTEST_STATISTICS) {
+      const value = statistics[field];
+      if (value !== null && value !== undefined && typeof value !== "number") {
+        broken.push({ key: contest.key, missing: [`${field} is ${typeof value}`] });
+      }
+    }
+  }
+  return {
+    ok: broken.length === 0,
+    detail:
+      broken.length === 0
+        ? `${REQUIRED_CONTEST_STATISTICS.length} required statistics fields present on all ${(output.contests || []).length} contests`
+        : `${broken.length} contest(s) have an unusable statistics block: ${broken
+            .slice(0, 3)
+            .map((entry) => `${entry.key} missing ${entry.missing.join(", ")}`)
+            .join("; ")}`,
+    broken,
   };
 }
 
@@ -107,6 +174,9 @@ function checkEloHealth(output, limits) {
     checks.push({ name, ok, detail });
   };
 
+  const schema = checkContestSchema(output);
+  push("contest-statistics", schema.ok, schema.detail);
+
   push(
     "mean-rating-drift",
     Math.abs(metrics.ratingDrift) <= effective.meanRatingDrift,
@@ -124,10 +194,11 @@ function checkEloHealth(output, limits) {
   );
   push("rating-range", metrics.maxAbsRating <= effective.maxAbsRating, `max |rating| ${metrics.maxAbsRating.toFixed(0)} (limit ${effective.maxAbsRating})`);
   push("events-present", metrics.ratingEvents > 0, `${metrics.ratingEvents} rating events`);
+  push("spearman-present", Number.isFinite(metrics.meanSpearman), `mean rated-only Spearman ${metrics.meanSpearman == null ? "n/a" : metrics.meanSpearman.toFixed(4)} over ${metrics.scoredContests} contests`);
   push(
-    "spearman-present",
-    Number.isFinite(metrics.meanSpearman),
-    `mean rated-only Spearman ${metrics.meanSpearman == null ? "n/a" : metrics.meanSpearman.toFixed(4)} over ${metrics.scoredContests} contests`,
+    "full-field-metric",
+    Number.isFinite(metrics.meanSpearmanFull),
+    `mean full-field Spearman ${metrics.meanSpearmanFull == null ? "n/a" : metrics.meanSpearmanFull.toFixed(4)} over ${metrics.fullFieldContests} contests`,
   );
 
   return { ok: checks.every((check) => check.ok), metrics, checks };
@@ -153,7 +224,10 @@ function formatHealthReport(report) {
 
 module.exports = {
   DEFAULT_LIMITS,
+  REQUIRED_CONTEST_STATISTICS,
+  OPTIONAL_CONTEST_STATISTICS,
   summarizeEloOutput,
+  checkContestSchema,
   checkEloHealth,
   formatHealthReport,
 };

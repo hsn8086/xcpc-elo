@@ -89,6 +89,57 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Converts values into competition ranks, sharing the average rank on ties.
+ *
+ * @param {number[]} values Values to rank, higher is better.
+ * @returns {number[]} Mid-ranks, where the largest value gets rank 1.
+ */
+function midRanks(values) {
+  const order = [...values.keys()].sort((left, right) => values[right] - values[left]);
+  const ranks = new Array(values.length);
+  let index = 0;
+  while (index < order.length) {
+    let end = index;
+    while (end + 1 < order.length && values[order[end + 1]] === values[order[index]]) {
+      end += 1;
+    }
+    const shared = (index + end) / 2 + 1;
+    for (let cursor = index; cursor <= end; cursor += 1) {
+      ranks[order[cursor]] = shared;
+    }
+    index = end + 1;
+  }
+  return ranks;
+}
+
+/**
+ * Pearson correlation of two rank vectors.
+ *
+ * @param {number[]} left First ranks.
+ * @param {number[]} right Second ranks.
+ * @returns {number} Correlation, or 0 when either vector has no spread.
+ */
+function pearsonOfRanks(left, right) {
+  const count = left.length;
+  const meanLeft = left.reduce((sum, value) => sum + value, 0) / count;
+  const meanRight = right.reduce((sum, value) => sum + value, 0) / count;
+  let covariance = 0;
+  let varianceLeft = 0;
+  let varianceRight = 0;
+  for (let index = 0; index < count; index += 1) {
+    const dx = left[index] - meanLeft;
+    const dy = right[index] - meanRight;
+    covariance += dx * dy;
+    varianceLeft += dx * dx;
+    varianceRight += dy * dy;
+  }
+  if (varianceLeft === 0 || varianceRight === 0) {
+    return 0;
+  }
+  return covariance / Math.sqrt(varianceLeft * varianceRight);
+}
+
 const MIN_RATING_FOR_SEARCH = -20000;
 const MAX_RATING_FOR_SEARCH = 20000;
 
@@ -341,15 +392,35 @@ function applyCodeforcesUpdate(input, playerStates) {
   });
   const fullTeamCount = predictedOrder.length;
 
+  // Full-field rank correlation.
+  //
+  // Ties matter here in a way they do not for the rated-only figure. Cold-start
+  // teams all carry the initial rating, so any contest with few rated teams has a
+  // predicted ordering that is mostly tie-breaking, and a stable sort leaves those
+  // ties in rank order. The plain 1 - 6*sum(d^2)/(n^3-n) formula would then score
+  // such a contest near 1.0, which is the exact opposite of the truth: a contest
+  // that is entirely first-time participants would score a perfect correlation
+  // while the model knows nothing about any of them.
+  //
+  // Ranking with mid-ranks and taking the Pearson correlation of the two rank
+  // vectors handles that correctly, because a block of tied predictions spreads
+  // over the ranks it covers instead of claiming them in order.
+  var spearmanFull = null;
+  if (fullTeamCount >= 2) {
+    const predictedRanks = midRanks(predictedOrder.map((team) => team.rating));
+    const actualRanks = predictedOrder.map((team) => team.rank);
+    spearmanFull = pearsonOfRanks(predictedRanks, actualRanks);
+  }
+
+  // A contest whose whole field is new has no rating-based prediction at all.
+  const hasPrediction = predictedTeams.length >= 2;
   const predictionStats = {
     predictionTeamCount: predictedTeams.length,
-    predictionSpearman: 1 - (6 * spearmanSum) / (predictedTeams.length * (predictedTeams.length * predictedTeams.length - 1)),
-    // Same ordering, but with every team counted instead of only the teams that
-    // already had history. The two numbers can differ a lot, and the headline one
-    // should not be the easy subset alone.
-    predictionSpearmanFull:
-      fullTeamCount >= 2 ? 1 - (6 * spearmanSumFull) / (fullTeamCount * (fullTeamCount * fullTeamCount - 1)) : 0,
-    predictionStddev: Math.sqrt(deviation / predictedTeams.length),
+    predictionSpearman: hasPrediction
+      ? 1 - (6 * spearmanSum) / (predictedTeams.length * (predictedTeams.length * predictedTeams.length - 1))
+      : null,
+    predictionSpearmanFull: spearmanFull,
+    predictionStddev: predictedTeams.length > 0 ? Math.sqrt(deviation / predictedTeams.length) : null,
   };
 
   // Teams without contest history are anchored to the closest rated teams around
@@ -451,12 +522,15 @@ function applyCodeforcesUpdate(input, playerStates) {
   const topCount = 0;
 
   var firstTimeParticipantCount = 0;
-  var firstTimeParticipantDeltaSum = 0;
+  // Sum of the post-contest ratings of this contest's first-time participants, so
+  // the average is the average rating they landed on. The contest page reads this
+  // field by name, so it is part of the output schema.
+  var firstTimeParticipantRatingSum = 0;
   var ratingSum = 0;
   for (const participant of output) {
     if (!hasContestHistory(participant.id)) {
       firstTimeParticipantCount++;
-      firstTimeParticipantDeltaSum += participant.delta;
+      firstTimeParticipantRatingSum += participant.rating + participant.delta;
     }
     ratingSum += participant.rating + participant.delta;
   }
@@ -465,7 +539,7 @@ function applyCodeforcesUpdate(input, playerStates) {
     teamCount: teams.length,
     participantCount: output.length,
     firstTimeParticipantCount,
-    firstTimeParticipantDeltaSum,
+    firstTimeParticipantRatingSum,
     ratingSum,
     meanRating: output.length > 0 ? ratingSum / output.length : 0,
     adjustAlpha: ELO_ADJUST_ALPHA,
@@ -485,4 +559,6 @@ module.exports = {
   ELO_SCALE,
   ELO_TEAM_RATING_AGGREGATION,
   ELO_UPDATE_FACTOR,
+  midRanks,
+  pearsonOfRanks,
 };

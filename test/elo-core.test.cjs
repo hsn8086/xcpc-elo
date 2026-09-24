@@ -130,3 +130,46 @@ test("both prediction metrics are reported", () => {
   assert.equal(statistics.predictionTeamCount, 4);
   assert.equal(statistics.teamCount, 4);
 });
+
+test("midRanks shares the average rank across ties", () => {
+  const core = loadCore({});
+  assert.deepEqual(core.midRanks([2000, 1800, 1600, 1400]), [1, 2, 3, 4]);
+  assert.deepEqual(core.midRanks([1400, 1400, 1400, 1400]), [2.5, 2.5, 2.5, 2.5]);
+  assert.deepEqual(core.midRanks([1800, 1400, 1400]), [1, 2.5, 2.5]);
+});
+
+test("a fully tied prediction scores zero, not one", () => {
+  const core = loadCore({});
+  // This is the failure the full-field metric used to have: cold-start teams all
+  // carry the same rating, a stable sort leaves them in rank order, and the plain
+  // Spearman formula then reports a perfect correlation for a contest the model
+  // knows nothing about.
+  const tied = core.midRanks([1400, 1400, 1400, 1400]);
+  assert.equal(core.pearsonOfRanks(tied, [1, 2, 3, 4]), 0);
+});
+
+test("rank correlation sign follows a correctly ordered prediction", () => {
+  const core = loadCore({});
+  const actual = [1, 2, 3, 4];
+  assert.equal(core.pearsonOfRanks(core.midRanks([2000, 1800, 1600, 1400]), actual), 1);
+  assert.equal(core.pearsonOfRanks(core.midRanks([1400, 1600, 1800, 2000]), actual), -1);
+});
+
+test("cold-start contests report no correlation instead of a fake one", () => {
+  const core = loadCore({ XCPC_ELO_ADJUST_ALPHA: "0.5" });
+  // Every member is new, so there is nothing to predict from.
+  const teams = [
+    { rank: 1, teamName: "A", members: ["a1", "a2", "a3"] },
+    { rank: 2, teamName: "B", members: ["b1", "b2", "b3"] },
+    { rank: 3, teamName: "C", members: ["c1", "c2", "c3"] },
+  ];
+  const states = new Map();
+  for (const id of ["a1", "a2", "a3", "b1", "b2", "b3", "c1", "c2", "c3"]) {
+    states.set(id, { id, rating: 1400, history: [] });
+  }
+  const [, statistics] = core.applyCodeforcesUpdate(teams, states);
+  assert.equal(statistics.predictionTeamCount, 0);
+  assert.equal(statistics.predictionSpearman, null);
+  assert.equal(statistics.predictionSpearmanFull, 0);
+  assert.equal(statistics.predictionStddev, null);
+});

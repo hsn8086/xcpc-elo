@@ -110,6 +110,22 @@
       }),
     );
     const d = contest.statistics || {};
+    /**
+     * Formats one statistic card value.
+     *
+     * Numbers are localised, a non-finite number and a missing value both render
+     * as a dash, and anything already formatted (the correlations arrive as fixed
+     * point strings) is passed through untouched.
+     *
+     * @param {*} value Raw value.
+     * @returns {string} Display text.
+     */
+    const formatStatistic = (value) => {
+      if (typeof value === "number") {
+        return Number.isFinite(value) ? value.toLocaleString() : "-";
+      }
+      return value == null ? "-" : `${value}`;
+    };
     participants.sort((a, b) => a.rank - b.rank || a.memberIndex - b.memberIndex);
     title.textContent = contest.title || `比赛 #${index}`;
     const unratedNote = contest.unrated ? " · unrated（不计入 rating）" : "";
@@ -136,12 +152,13 @@
       ["平均 rating", d.ratingSum / d.participantCount],
       ["delta 调整", d.adjustment1],
       ["预测队伍数", d.predictionTeamCount],
-      ["预测相关系数", d.predictionSpearman ? d.predictionSpearman.toFixed(4) : "N/A"],
+      ["预测相关系数", Number.isFinite(d.predictionSpearman) ? d.predictionSpearman.toFixed(4) : null],
+      ["全量场相关系数", Number.isFinite(d.predictionSpearmanFull) ? d.predictionSpearmanFull.toFixed(4) : null],
       ["预测误差标准差", d.predictionStddev],
     ]
       .map(
         ([label, value]) =>
-          `<div class="statistic-card"><span>${label}</span><strong>${Number.isFinite(value) ? value.toLocaleString() : (value ?? "-")}</strong></div>`,
+          `<div class="statistic-card"><span>${label}</span><strong>${escapeHtml(formatStatistic(value))}</strong></div>`,
       )
       .join("");
     var tableHTML = "";

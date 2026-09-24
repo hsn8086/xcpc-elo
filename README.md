@@ -60,7 +60,9 @@ Two numbers are always reported, because they answer different questions:
 - **rated-only** — only teams that already had contest history. This is the historical headline number.
 - **full field** — every team, including cold-start teams the model has no information about. This is what a reader of a contest page actually sees.
 
-On the bundled data the two differ by roughly 0.04 (`0.79` vs `0.75` per contest), because about a fifth of all team entries are cold starts. Reporting only the first one overstates how well the model predicts a contest.
+On the main 2023+ ICPC/CCPC contests the two are `0.7930` and `0.7415`, and across every contest they are `0.7386` and `0.5609`. The gap is entirely cold starts: reporting only the first number overstates how well a contest is actually predicted.
+
+The full-field figure ranks tied predictions with mid-ranks and correlates rank vectors, rather than using `1 - 6*sum(d^2)/(n^3-n)`. That matters because cold-start teams all carry the initial rating, so in a contest with few rated teams the predicted order is mostly tie-breaking, and a stable sort leaves those ties in rank order. The naive formula scores such a contest at or near `1.0`. A contest that is entirely first-time participants would score a perfect correlation while the model knows nothing about any of them; it now reports `0`.
 
 `npm run report:elo-metrics` prints both, and `--against` runs a paired bootstrap over per-contest scores so a change can be judged instead of eyeballed. A parameter change is only worth keeping when the 95% interval excludes zero.
 
