@@ -75,6 +75,45 @@
       ...player,
     };
   });
+
+  // Teammates all receive the same target, so their deltas are identical whenever
+  // they started a contest at the same rating. Once that has happened the personal
+  // rating carries no information beyond the lineup, and the leaderboard legitimately
+  // shows several members of one team on exactly the same number. Counting how often
+  // that happens is the honest way to present it instead of implying the members were
+  // measured apart from each other.
+  {
+    const teamGroups = new Map();
+    players.forEach((player, index) => {
+      player.history.forEach((event) => {
+        const key = `${event[0]}|${event[1]}`;
+        if (!teamGroups.has(key)) {
+          teamGroups.set(key, []);
+        }
+        teamGroups.get(key).push({ index, delta: event[2] });
+      });
+    });
+    const counters = new Map();
+    for (const group of teamGroups.values()) {
+      if (group.length < 2) {
+        continue;
+      }
+      const identical = group.every((entry) => entry.delta === group[0].delta);
+      for (const entry of group) {
+        const counter = counters.get(entry.index) || { same: 0, total: 0 };
+        counter.total += 1;
+        if (identical) {
+          counter.same += 1;
+        }
+        counters.set(entry.index, counter);
+      }
+    }
+    players.forEach((player, index) => {
+      const counter = counters.get(index) || { same: 0, total: 0 };
+      player.blendedContests = counter.same;
+      player.teammateContests = counter.total;
+    });
+  }
   const globalRankByCurrent = new Map(
     [...players]
       .sort((a, b) => b.rating - a.rating || topScore(b) - topScore(a) || b.contests - a.contests || a.id.localeCompare(b.id))
@@ -144,13 +183,42 @@
   }
 
   /**
+   * Averages the prediction quality of the run.
+   *
+   * Both numbers are reported on purpose. The rated-only figure is the historical
+   * headline and only covers teams that already had contest history. The full-field
+   * figure includes every team, including the cold-start ones the model has no
+   * information about, which is what a reader of a contest page actually sees.
+   *
+   * @returns {{ratedOnly: string, fullField: string}} Formatted averages.
+   */
+  function summarizePrediction() {
+    const average = (field) => {
+      const values = contests
+        .map((contest) => (contest.statistics ? contest.statistics[field] : null))
+        .filter((value) => Number.isFinite(value));
+      return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    };
+    const rated = average("predictionSpearman");
+    const full = average("predictionSpearmanFull");
+    return {
+      ratedOnly: rated == null ? "—" : rated.toFixed(4),
+      fullField: full == null ? "—" : full.toFixed(4),
+    };
+  }
+
+  /**
    * Updates the global subtitle with dataset statistics.
    */
   function renderSummary() {
+    const prediction = summarizePrediction();
+    const adjustAlpha = data.config.adjustAlpha;
     subtitle.textContent =
       `共 ${data.totals.players.toLocaleString()} 名选手, ${data.totals.contests.toLocaleString()} 场比赛, ` +
       `生成时间: ${new Date(data.generatedAt).toLocaleString("zh-CN")}; 初始分: ${initialRating}, 缩放系数: ${eloScale}, 更新系数: ${eloUpdateFactor}, ` +
-      `rating聚合函数: ${data.config.teamRatingAggregation}`;
+      `rating聚合函数: ${data.config.teamRatingAggregation}` +
+      (adjustAlpha == null ? "" : `, 调整系数 α: ${adjustAlpha}`) +
+      `; 预测质量 Spearman: 有线队 ${prediction.ratedOnly} / 全场 ${prediction.fullField}`;
   }
 
   /**
@@ -263,6 +331,7 @@
         player.maxRating,
         formatTopRating(player.maxRating),
       )} | 参赛 ${player.contests} 场 | 最后参赛 ${formatDateOnly(player.lastCompetedTimestamp)}` +
+      (player.teammateContests > 0 ? ` | 与队友同分 ${player.blendedContests}/${player.teammateContests} 场` : "") +
       `&nbsp;<a href="https://hei-maom.github.io/xcpcrating/#/player/${encodeURI(player.name)}%40${encodeURI(player.organization)}" target="_blank">XCPC-Rating</a>`;
 
     drawChart(player);
