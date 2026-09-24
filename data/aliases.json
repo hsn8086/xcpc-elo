@@ -1,0 +1,104 @@
+{
+  "_comment": "Reviewed identity merges. A player's identity is the (organization, name) pair, so one person competing under several organizations becomes several entities that each start from the initial rating. Add merges here only after checking the candidate list produced by `npm run step:2c:alias-candidates`. Never merge on name alone: common names legitimately span dozens of organizations.",
+  "_format": {
+    "canonical": "{ organization, name } - the identity that survives and supplies the displayed organization",
+    "aliases": "[{ organization, name }] - identities folded into the canonical one"
+  },
+  "_reviewNote": "Every merge must carry \"reviewed\": true to take effect. Without it the entry is listed as skipped and ignored. The data has no per-person identifier, so a merge can never be derived from the ranklists: it is an editorial claim about who somebody is.",
+  "merges": [
+    {
+      "canonical": {
+        "organization": "北京大学",
+        "name": "蒋凌宇"
+      },
+      "aliases": [
+        {
+          "organization": "代码源",
+          "name": "蒋凌宇"
+        },
+        {
+          "organization": "个人参赛",
+          "name": "蒋凌宇"
+        }
+      ],
+      "reviewed": false,
+      "reviewNote": "Seeded by an agent from shared-teammate evidence. Set reviewed=true once a human has confirmed it."
+    },
+    {
+      "canonical": {
+        "organization": "清华大学",
+        "name": "许庭强"
+      },
+      "aliases": [
+        {
+          "organization": "个人参赛",
+          "name": "许庭强"
+        },
+        {
+          "organization": "代码源",
+          "name": "许庭强"
+        }
+      ],
+      "reviewed": false,
+      "reviewNote": "Seeded by an agent from shared-teammate evidence. Set reviewed=true once a human has confirmed it."
+    },
+    {
+      "canonical": {
+        "organization": "个人参赛",
+        "name": "杜瑜皓"
+      },
+      "aliases": [
+        {
+          "organization": "代码源",
+          "name": "杜瑜皓"
+        },
+        {
+          "organization": "浙江大学",
+          "name": "杜瑜皓"
+        },
+        {
+          "organization": "清华大学",
+          "name": "杜瑜皓"
+        },
+        {
+          "organization": "北京大学",
+          "name": "杜瑜皓"
+        }
+      ],
+      "reviewed": false,
+      "reviewNote": "Seeded by an agent from shared-teammate evidence. Set reviewed=true once a human has confirmed it."
+    },
+    {
+      "canonical": {
+        "organization": "上海大学",
+        "name": "陶钧"
+      },
+      "aliases": [
+        {
+          "organization": "哈尔滨工业大学",
+          "name": "陶钧"
+        },
+        {
+          "organization": "个人参赛",
+          "name": "陶钧"
+        }
+      ],
+      "reviewed": false,
+      "reviewNote": "Seeded by an agent from shared-teammate evidence. Set reviewed=true once a human has confirmed it."
+    },
+    {
+      "canonical": {
+        "organization": "哈尔滨工业大学",
+        "name": "邱思宇"
+      },
+      "aliases": [
+        {
+          "organization": "上海大学",
+          "name": "邱思宇"
+        }
+      ],
+      "reviewed": false,
+      "reviewNote": "Seeded by an agent from shared-teammate evidence. Set reviewed=true once a human has confirmed it."
+    }
+  ]
+}
