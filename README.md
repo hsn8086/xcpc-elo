@@ -20,14 +20,12 @@ This runs the full workflow in order:
    `npm run step:1:static-ranklists`
 2. Extract teammate-organization map  
    `npm run step:2:teammate-org-map`
-3. Suggest identity merges for review (does not modify anything)  
-   `npm run step:2c:alias-candidates`
-4. Compute Elo, then run the health checks  
+3. Compute Elo, then run the health checks  
    `npm run step:3:compute-elo`
-5. Build frontend assets  
+4. Build frontend assets  
    `npm run step:4:build-frontend`
 
-`npm run workflow:recompute-elo` is equivalent to steps 2, 4 and 5.
+`npm run workflow:recompute-elo` is equivalent to steps 2, 3 and 4.
 
 ```bash
 npm test                                  # unit tests
@@ -68,19 +66,40 @@ On the bundled data the two differ by roughly 0.04 (`0.79` vs `0.75` per contest
 
 ## Identity
 
-**The data contains no per-person identifier.** All 394 ranklists were checked: `teamMembers[]` carries only `name` (plus `role` for coaches), and `user.id` is a row number that appears in more than one contest only 19% of the time. Identity therefore has to be the `(organization, name)` pair, which is wrong in both directions:
+**A player is the `(organization, name)` pair. Nothing is merged.**
 
-- one person competing under several organizations becomes several entities that each start from the initial rating;
-- two different people with the same name at the same organization become one entity.
+This is a deliberate limit, not an oversight. All 394 ranklists were checked for a
+person-level identifier and there is none: `teamMembers[]` carries only `name`
+(plus `role`, for coaches) across all 82,183 member records, and the `id` on a row
+is a row number that appears in more than one contest only 19% of the time.
 
-The scale of the ambiguity is measurable: within a *single* contest, the same name appears on more than one team 10,727 times across 181 contests.
+So both error directions are real and neither can be resolved from the data:
 
-`data/aliases.json` merges identities across organizations. Two rules apply:
+- one person competing under several organizations becomes several entities that
+  each start from the initial rating;
+- two different people with the same name at the same organization become a single
+  entity.
 
-1. **A merge only takes effect with `"reviewed": true`.** Without it the entry is listed as skipped and ignored. A merge is always an editorial claim about who somebody is, so it should be a deliberate one.
-2. **A merge whose identities ever appear in the same contest is rejected.** One person cannot play for two teams in one contest, so such a pair is provably different people. This check is the only sound inference the data supports, and it fails the build rather than corrupting the ratings silently.
+The ambiguity is not rare. Within a *single* contest, the same name appears on more
+than one team 10,727 times across 181 contests, which is the point: a name alone is
+already insufficient before any cross-contest reasoning starts.
 
-`npm run step:2c:alias-candidates` writes `out/alias-candidates.json` to make the review short. It ranks candidates by shared teammates and reports how much that signal is actually worth, using a control group: identities that are *provably* different people share a teammate name 0.3% of the time, while unresolved candidate pairs do so 7.6% of the time. That is a 20x lift and a useful ordering, but it is not proof — a teammate is itself only a name, which is what the 0.3% floor measures. Treat the list as reading material for a human decision.
+Merging identities was considered and rejected. The only sound inference the data
+supports runs the other way — two identities that appear in the same contest are
+*definitely* different people — and that can only falsify a merge, never justify
+one. The tempting positive signal (shared teammates, disjoint contests) is real but
+statistical: measured against a control group of provably different people, it has
+a 0.3% false-positive floor and about a 20x lift, and it is self-referential because
+a teammate is itself only a name. That is not a foundation for silently combining
+people, so instead the pages report the ambiguity and let a reader judge:
+
+- a `*` next to a name on the leaderboard means other entities share that name;
+- the player page links to those entities, with their contest counts and ratings,
+  so `蒋凌宇@北京大学`, `蒋凌宇@代码源` and `蒋凌宇@个人参赛` are all reachable
+  from one another.
+
+If the entries are later resolved by a human, the place to do it is the identity
+function used by `build-teammate-map.cjs`; the rating code needs no changes.
 
 ## Health Checks
 
@@ -149,7 +168,6 @@ The plugin point for changing the shape of the schedule is `scripts/lib/elo-core
 
 - Invalid teammate report: `out/_invalid-teammates.json`
 - Teammate map: `out/teammate-map.json`
-- Identity candidates for review: `out/alias-candidates.json`
 - Elo data: `out/teammate-elo.json`
 - Parameter sweep: `out/elo-experiment/results.csv`
 - Frontend: `out/frontend/*`

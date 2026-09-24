@@ -440,3 +440,12 @@ tbody tr.team-border {
     padding: 7px 8px;
   }
 }
+
+/* Marks a name that has same-name entities in other organizations. The identity
+   model is (organization, name) because the ranklists have no person identifier,
+   so the leaderboard can legitimately contain several entries for one person. */
+.peer-mark {
+  margin-left: 2px;
+  color: var(--muted, #7a8a90);
+  cursor: help;
+}

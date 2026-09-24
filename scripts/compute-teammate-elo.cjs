@@ -65,17 +65,6 @@ function buildTeammateIndex(teammateMap) {
     byPairLower.set(key.toLowerCase(), id);
   }
 
-  // Alias pairs are redirected to the canonical identity's id. They must be
-  // registered explicitly: the alias pair itself is not one of the entries, and
-  // without the redirect the resolver would register a brand new identity for it.
-  for (const [key, id] of Object.entries((teammateMap && teammateMap.aliasPairs) || {})) {
-    if (!key || !id || !byId.has(id)) {
-      continue;
-    }
-    byPair.set(key, id);
-    byPairLower.set(key.toLowerCase(), id);
-  }
-
   return { byId, byPair, byPairLower };
 }
 /**

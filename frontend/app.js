@@ -120,6 +120,32 @@
       .map((player, index) => [player.id, index + 1]),
   );
   const playerById = new Map(players.map((player) => [player.id, player]));
+
+  // Identity is the (organization, name) pair, because the ranklists carry no
+  // per-person identifier at all: `teamMembers[]` has only a name and the "id"
+  // field on a row is a row number. So one person competing under several
+  // organizations becomes several entities, and two different people who share a
+  // name at one organization become a single one. Neither can be resolved from the
+  // data, so the pages report the ambiguity instead of guessing: every player is
+  // linked to the other entities that carry the same name.
+  const sameNamePeersByName = new Map();
+  for (const player of players) {
+    if (!sameNamePeersByName.has(player.name)) {
+      sameNamePeersByName.set(player.name, []);
+    }
+    sameNamePeersByName.get(player.name).push(player);
+  }
+  /**
+   * Lists the other entities that share a player's name.
+   *
+   * @param {object} player Player record.
+   * @returns {object[]} Peers in a different organization, most experienced first.
+   */
+  function sameNamePeers(player) {
+    return (sameNamePeersByName.get(player.name) || [])
+      .filter((peer) => peer.organization !== player.organization)
+      .sort((a, b) => b.contests - a.contests);
+  }
   const requestedPlayerId = new URLSearchParams(window.location.search).get("player");
 
   const state = {
@@ -282,7 +308,7 @@
         return `
           <tr class="${selected}" data-player-id="${escapeHtml(player.id)}">
             <td class="mono">${shownRank}</td>
-            <td>${escapeHtml(player.name || player.id)}</td>
+            <td>${escapeHtml(player.name || player.id)}${sameNamePeers(player).length ? `<span class="peer-mark" title="有同名实体，见详情">*</span>` : ""}</td>
             <td>${escapeHtml(player.organization || "")}</td>
             <td class="mono">${formatRatingColored(player.rating, player.rating)}</td>
             <td class="mono">${formatRatingColored(player.maxRating, formatTopRating(player.maxRating))}</td>
@@ -332,6 +358,19 @@
         formatTopRating(player.maxRating),
       )} | 参赛 ${player.contests} 场 | 最后参赛 ${formatDateOnly(player.lastCompetedTimestamp)}` +
       (player.teammateContests > 0 ? ` | 与队友同分 ${player.blendedContests}/${player.teammateContests} 场` : "") +
+      (() => {
+        const peers = sameNamePeers(player);
+        if (!peers.length) {
+          return "";
+        }
+        const links = peers
+          .map(
+            (peer) =>
+              `<a href="?player=${encodeURIComponent(peer.id)}" title="参赛 ${peer.contests} 场，当前 ${peer.rating}">${escapeHtml(peer.organization || "未知组织")}</a>`,
+          )
+          .join("、");
+        return ` | 同名其他组织: ${links}`;
+      })() +
       `&nbsp;<a href="https://hei-maom.github.io/xcpcrating/#/player/${encodeURI(player.name)}%40${encodeURI(player.organization)}" target="_blank">XCPC-Rating</a>`;
 
     drawChart(player);
